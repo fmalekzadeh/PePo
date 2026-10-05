@@ -81,6 +81,30 @@ final class ServerController {
 
     var isBusy: Bool { activeRequestCount > 0 }
 
+    /// The HTTP port's TLS-serving twin — always `port + 1`, not separately
+    /// configurable, to keep this simple. `nil` only in the practically
+    /// impossible case of `port` already being `UInt16.max`.
+    var httpsPort: UInt16? {
+        let next = Int(port) + 1
+        return next <= Int(UInt16.max) ? UInt16(next) : nil
+    }
+
+    /// Whether the HTTPS listener actually started. Best-effort and
+    /// independent of `status`/`isRunning` — if certificate generation or
+    /// import fails for any reason (no `openssl`, etc.), the plain HTTP
+    /// listener still runs exactly as it always has; this just stays false.
+    private(set) var isHTTPSActive = false {
+        didSet { if isHTTPSActive != oldValue { onChange?() } }
+    }
+
+    /// Shown in the popover once HTTPS actually came up — e.g. for a hosted
+    /// prototype's Safari testers, who need to visit this once to accept the
+    /// self-signed certificate before `fetch()` calls to it will work.
+    var httpsHealthURL: String? {
+        guard isHTTPSActive, let httpsPort else { return nil }
+        return "https://127.0.0.1:\(httpsPort)/health"
+    }
+
     /// System instructions sent once, when a session is first created — set
     /// from the main popover, inherited by Test Chat (and any other client
     /// that uses the shared `appSessionName` session). Persisted so it
@@ -140,6 +164,7 @@ final class ServerController {
     var onChange: (() -> Void)?
 
     private var server: HTTPServer?
+    private var httpsServer: HTTPServer?
     private let modelService = ModelService()
 
     // Deliberately distinct from the app's own CFBundleIdentifier
@@ -214,12 +239,37 @@ final class ServerController {
         } catch {
             server = nil
             status = .error(error.localizedDescription)
+            return
+        }
+
+        // Additive and best-effort: runs after the primary HTTP listener is
+        // already confirmed up, and never affects `status` either way.
+        if let httpsPort {
+            Task { [weak self] in
+                await self?.startHTTPSServer(router: router, port: httpsPort)
+            }
+        }
+    }
+
+    private func startHTTPSServer(router: Router, port: UInt16) async {
+        do {
+            let identity = try await TLSIdentityManager.loadOrCreateIdentity()
+            guard isRunning else { return } // stopped while the cert was loading
+            let newHTTPSServer = HTTPServer(port: port, tlsIdentity: identity, handler: router.handle)
+            try newHTTPSServer.start()
+            httpsServer = newHTTPSServer
+            isHTTPSActive = true
+        } catch {
+            isHTTPSActive = false
         }
     }
 
     func stop() {
         server?.stop()
         server = nil
+        httpsServer?.stop()
+        httpsServer = nil
+        isHTTPSActive = false
         status = .stopped
         activeRequestCount = 0
     }

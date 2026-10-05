@@ -42,6 +42,17 @@ disclaimer in its standard legal form as well.
 
 - Runs a minimal HTTP/1.1 server (built directly on `Network.framework`, no
   dependencies) bound to `127.0.0.1` only — it never listens on your network.
+- Also serves HTTPS on `port + 1`, using a self-signed certificate generated
+  once (via the system's own `/usr/bin/openssl`, not a bundled dependency)
+  and cached in Application Support. This exists for browser-hosted clients:
+  a page published on a public HTTPS origin (e.g. a Figma Make prototype)
+  that talks to a local PePo instance hits two different browser
+  restrictions calling `http://127.0.0.1` from an `https://` page — Chrome's
+  (Private Network Access) is satisfied by a response header this server
+  already sends; Safari's (plain mixed-content blocking) has no such header
+  and can only be satisfied by the target also being `https://`. Each person
+  testing such a prototype in Safari needs to visit the HTTPS health URL
+  once (shown in the popover while running) to accept the certificate.
 - Exposes an OpenAI-compatible API:
   - `GET /health` — status check
   - `GET /v1/models` — lists the one available model (`apple-on-device`)
@@ -85,7 +96,11 @@ disclaimer in its standard legal form as well.
 - macOS 26 or later, with Apple Intelligence enabled
 - Xcode's Command Line Tools (`xcode-select --install`) — a full Xcode
   install is not required; this is a plain AppKit app with no SwiftUI/Storyboard
-  dependency
+  dependency. Only needed to *build* from source — running a pre-built
+  `Petit Pomme.app` doesn't require it.
+- `/usr/bin/openssl` (present on stock macOS by default) — only used to mint
+  the local HTTPS certificate on first launch; if it's missing, the plain
+  HTTP server still works exactly as before, just without the HTTPS listener.
 
 ## Installing a pre-built app
 

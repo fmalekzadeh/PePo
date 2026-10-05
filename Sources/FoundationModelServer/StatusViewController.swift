@@ -27,6 +27,7 @@ final class StatusViewController: NSViewController {
     private let portField = NSTextField()
     private let urlLabel = NSTextField(labelWithString: "")
     private let copyURLButton = NSButton(image: NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: "Copy URL") ?? NSImage(), target: nil, action: nil)
+    private let httpsNoteLabel = NSTextField(wrappingLabelWithString: "")
     private let endpointsLabel = NSTextField(wrappingLabelWithString: "")
     private let autoSummaryLabel = NSTextField(labelWithString: "Auto-summarize sessions")
     private let autoSummaryToggle = NSSwitch()
@@ -193,6 +194,18 @@ final class StatusViewController: NSViewController {
         urlRow.alignment = .centerY
         urlRow.spacing = 5
 
+        // Shown only once the HTTPS listener actually comes up (best-effort —
+        // see `ServerController.isHTTPSActive`). Needed for a hosted
+        // prototype's Safari testers specifically: unlike Chrome, Safari has
+        // no response header that can let an https:// page fetch() a plain
+        // http:// loopback endpoint, so the page's own fetch target has to
+        // be https:// too, and each person visits this URL once to accept
+        // the self-signed certificate before that fetch will succeed.
+        httpsNoteLabel.font = .systemFont(ofSize: 10)
+        httpsNoteLabel.textColor = .tertiaryLabelColor
+        httpsNoteLabel.preferredMaxLayoutWidth = 264
+        httpsNoteLabel.isSelectable = true
+
         endpointsLabel.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
         endpointsLabel.textColor = .secondaryLabelColor
         endpointsLabel.stringValue = "POST /v1/chat/completions\nGET  /v1/models\nGET  /v1/sessions"
@@ -216,6 +229,7 @@ final class StatusViewController: NSViewController {
         let serverBlock = NSStackView(views: [
             portRow,
             urlRow,
+            httpsNoteLabel,
             endpointsLabel,
             autoSummaryRow,
             autoSummaryNoteLabel,
@@ -317,7 +331,7 @@ final class StatusViewController: NSViewController {
             stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -padding),
             stack.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -padding),
         ])
-        for row in [headerBlock, headerRow, serverBlock, portRow, urlRow, autoSummaryRow, instructionsBlock, instructionsLabelRow, menuBlock, testRow, newSessionRow, aboutRow, quitRow] {
+        for row in [headerBlock, headerRow, serverBlock, portRow, urlRow, httpsNoteLabel, autoSummaryRow, instructionsBlock, instructionsLabelRow, menuBlock, testRow, newSessionRow, aboutRow, quitRow] {
             row.translatesAutoresizingMaskIntoConstraints = false
             row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
@@ -351,6 +365,13 @@ final class StatusViewController: NSViewController {
         urlLabel.stringValue = "http://127.0.0.1:\(controller.port)/v1"
         copyURLButton.isHidden = !controller.isRunning
         endpointsLabel.isHidden = !controller.isRunning
+
+        if let httpsHealthURL = controller.httpsHealthURL {
+            httpsNoteLabel.isHidden = false
+            httpsNoteLabel.stringValue = "For Safari/hosted prototypes, visit \(httpsHealthURL) once to approve the local certificate."
+        } else {
+            httpsNoteLabel.isHidden = true
+        }
 
         requestCountLabel.isHidden = !controller.isRunning
         requestCountLabel.stringValue = "\(controller.requestCount) request\(controller.requestCount == 1 ? "" : "s") served"

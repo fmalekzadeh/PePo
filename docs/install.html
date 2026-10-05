@@ -210,6 +210,28 @@
     to end the current conversation and try a different one.
   </p>
 
+  <h2>4. Using this with a browser-hosted client (e.g. a Figma prototype)</h2>
+  <p>
+    If you're pointing a published web page at your local PePo instead of a
+    native app, which browser you use matters:
+  </p>
+  <ul>
+    <li><strong>Chrome/Edge</strong> — works against the plain
+      <code>http://127.0.0.1:&lt;port&gt;</code> URL shown in the popover, no
+      extra steps.</li>
+    <li><strong>Safari</strong> — refuses to call a plain <code>http://</code>
+      endpoint from a page served over <code>https://</code>, with no
+      workaround on the server's side. PePo also serves HTTPS on
+      <code>port + 1</code> for exactly this reason, using a self-signed
+      certificate generated on first launch. The popover shows a URL like
+      <code>https://127.0.0.1:&lt;port+1&gt;/health</code> while the server is
+      running — visit it once in Safari and click through the "this
+      connection is not private" warning (it's your own Mac, talking to
+      itself) to accept the certificate. After that, point your hosted
+      page's requests at that same <code>https://</code> URL instead of
+      <code>http://</code>.</li>
+  </ul>
+
   <footer>
     Petit Pomme is published by PathPilot LLC, provided as-is with no
     warranty. See the project's README and LICENSE for full details.

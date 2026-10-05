@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import Security
 import os.log
 
 private let log = Logger(subsystem: "com.local.FoundationModelServer", category: "HTTPServer")
@@ -97,9 +98,16 @@ final class HTTPServer: @unchecked Sendable {
     private let queue = DispatchQueue(label: "com.local.FoundationModelServer.httpserver")
     let port: UInt16
     private let handler: HTTPHandler
+    /// When set, this listener terminates TLS using this identity instead of
+    /// serving plain HTTP — see `TLSIdentityManager`. Everything else
+    /// (request parsing, routing, response writing) is identical either way;
+    /// `HTTPResponseWriter` operates on the `NWConnection` without caring
+    /// whether TLS sits underneath it.
+    private let tlsIdentity: sec_identity_t?
 
-    init(port: UInt16, handler: @escaping HTTPHandler) {
+    init(port: UInt16, tlsIdentity: sec_identity_t? = nil, handler: @escaping HTTPHandler) {
         self.port = port
+        self.tlsIdentity = tlsIdentity
         self.handler = handler
     }
 
@@ -107,7 +115,14 @@ final class HTTPServer: @unchecked Sendable {
         guard let nwPort = NWEndpoint.Port(rawValue: port) else {
             throw ServerError.invalidPort
         }
-        let params = NWParameters.tcp
+        let params: NWParameters
+        if let tlsIdentity {
+            let tlsOptions = NWProtocolTLS.Options()
+            sec_protocol_options_set_local_identity(tlsOptions.securityProtocolOptions, tlsIdentity)
+            params = NWParameters(tls: tlsOptions, tcp: NWProtocolTCP.Options())
+        } else {
+            params = .tcp
+        }
         params.allowLocalEndpointReuse = true
         // Localhost-only: restrict to the loopback interface so this never
         // listens on the network, not just the Wi-Fi/Ethernet interface.
@@ -172,6 +187,17 @@ final class HTTPServer: @unchecked Sendable {
                     "Access-Control-Allow-Origin": "*",
                     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
                     "Access-Control-Allow-Headers": "Content-Type, Authorization",
+                    // Chrome's Private Network Access policy is stricter than
+                    // plain CORS: a page served from a public origin (e.g. a
+                    // published Figma site, which is HTTPS and publicly
+                    // reachable) calling into a loopback address like
+                    // 127.0.0.1 gets silently blocked unless the preflight
+                    // response explicitly opts in with this header. Without
+                    // it, this server is unreachable from any browser tab
+                    // whose page itself isn't also served from localhost —
+                    // exactly the case for a hosted prototype whose UI talks
+                    // to a copy of this app running on the viewer's own Mac.
+                    "Access-Control-Allow-Private-Network": "true",
                 ]
                 headers["Content-Type"] = "text/plain"
                 await writer.respond(HTTPResponse(status: 204, headers: headers))
