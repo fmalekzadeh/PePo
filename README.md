@@ -13,11 +13,10 @@ the author's own Anthropic Claude account, and the author's own Apple
 developer tools — none of it on employer time, employer equipment, or
 employer confidential information or trade secrets.
 
-Petit Pomme is **not a ServiceNow product**. It is not built, sponsored,
-endorsed, reviewed, or supported by ServiceNow in any capacity, and nothing
+Petit Pomme is **not affiliated with, sponsored, endorsed, reviewed, or
+supported by any employer of the author**, in any capacity, and nothing
 about its name, content, or distribution should be read as implying
-otherwise. Any ServiceNow trademarks are the property of their respective
-owner and are not implicated by this project.
+otherwise.
 
 Petit Pomme is published by **PathPilot LLC**.
 
