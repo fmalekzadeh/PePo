@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Install Petit Pomme</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f5f5f7;
+    --card: #ffffff;
+    --text: #1d1d1f;
+    --muted: #6e6e73;
+    --accent: #0071e3;
+    --code-bg: #f0f0f2;
+    --border: #e3e3e6;
+    --warn-bg: #fff8e6;
+    --warn-border: #f0d58c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1c1c1e;
+      --card: #2c2c2e;
+      --text: #f5f5f7;
+      --muted: #a1a1a6;
+      --accent: #409cff;
+      --code-bg: #1a1a1c;
+      --border: #3a3a3c;
+      --warn-bg: #3a2f14;
+      --warn-border: #6b5420;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 40px 20px 80px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", Helvetica, Arial, sans-serif;
+    line-height: 1.55;
+  }
+  main {
+    max-width: 680px;
+    margin: 0 auto;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    margin-bottom: 8px;
+  }
+  header img {
+    width: 72px;
+    height: 72px;
+    border-radius: 16px;
+  }
+  header h1 {
+    font-size: 28px;
+    margin: 0 0 4px;
+  }
+  header p.tagline {
+    margin: 0;
+    color: var(--muted);
+    font-size: 15px;
+  }
+  h2 {
+    font-size: 19px;
+    margin: 40px 0 12px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+  }
+  h2:first-of-type { border-top: none; padding-top: 0; }
+  p { font-size: 15px; }
+  ol, ul { font-size: 15px; padding-left: 22px; }
+  li { margin-bottom: 10px; }
+  code {
+    background: var(--code-bg);
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-size: 13px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    font-size: 13px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  pre code { background: none; padding: 0; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px 22px;
+    margin: 16px 0;
+  }
+  .note {
+    background: var(--warn-bg);
+    border: 1px solid var(--warn-border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    font-size: 14px;
+    margin: 16px 0;
+  }
+  .note strong { display: block; margin-bottom: 4px; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  footer {
+    margin-top: 48px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 13px;
+  }
+</style>
+</head>
+<body>
+<main>
+
+  <header>
+    <img src="AppIcon.png" alt="Petit Pomme icon">
+    <div>
+      <h1>Installing Petit Pomme</h1>
+      <p class="tagline">A local, OpenAI-compatible API in front of Apple's on-device Foundation Model.</p>
+    </div>
+  </header>
+
+  <h2>Requirements</h2>
+  <ul>
+    <li>macOS 26 or later</li>
+    <li>Apple Intelligence enabled (Settings → Apple Intelligence &amp; Siri)</li>
+  </ul>
+
+  <h2>1. Get the app</h2>
+  <p>
+    Copy <code>Petit Pomme.app</code> to your Mac, then drag it into your
+    <code>Applications</code> folder (or wherever you keep apps — it doesn't
+    need to live in <code>/Applications</code> to run).
+  </p>
+
+  <h2>2. First launch</h2>
+  <p>
+    Petit Pomme isn't distributed through the App Store and isn't signed with
+    an Apple Developer ID — it's a personal, self-built tool, signed only
+    "ad-hoc" on the machine that built it. The first time you open it, macOS's
+    <strong>Gatekeeper</strong> will likely block it with a message like:
+  </p>
+  <div class="card">
+    <em>"Petit Pomme.app" is damaged and can't be opened. You should move it
+    to the Trash.</em><br><br>
+    — or —<br><br>
+    <em>Apple could not verify "Petit Pomme.app" is free of malware that may
+    harm your Mac or compromise your privacy.</em>
+  </div>
+  <p>
+    Despite the alarming wording, this just means the app's signature isn't
+    from a path Gatekeeper already trusts — it's not a verdict that anything
+    is actually wrong with it. There are two ways past it:
+  </p>
+
+  <h3>Option A — right-click to open (no Terminal)</h3>
+  <ol>
+    <li>In Finder, <strong>Control-click</strong> (or right-click) <code>Petit Pomme.app</code>.</li>
+    <li>Choose <strong>Open</strong> from the menu.</li>
+    <li>In the dialog that appears, click <strong>Open Anyway</strong>
+      (you may need to approve this once more in
+      <strong>System Settings → Privacy &amp; Security</strong>, near the
+      bottom of the page).</li>
+  </ol>
+
+  <h3>Option B — clear it from Terminal</h3>
+  <p>
+    If Option A doesn't offer an "Open Anyway" button (common for apps copied
+    over AirDrop, a USB drive, or certain network shares), the app has a
+    <strong>quarantine flag</strong> attached to it. Clear it with:
+  </p>
+  <pre><code>xattr -cr "/Applications/Petit Pomme.app"</code></pre>
+  <p>
+    (Adjust the path if you put the app somewhere other than
+    <code>/Applications</code>.) Then just double-click the app normally —
+    it should open without complaint.
+  </p>
+
+  <div class="note">
+    <strong>This is not the same thing as disabling SIP.</strong>
+    System Integrity Protection (SIP) locks down core parts of macOS itself,
+    and turning it off system-wide (<code>csrutil disable</code>) weakens
+    real security protections for every app on your Mac — there's no reason
+    to do that here, and this guide never asks you to. The command above only
+    removes a <em>quarantine attribute</em> (Gatekeeper's "where did this come
+    from" flag) from this one app. SIP stays fully enabled the whole time.
+  </div>
+
+  <h2>3. Run it</h2>
+  <p>
+    A small apple icon appears in your menu bar. Click it, flip the
+    <strong>Server</strong> switch on, and it starts listening on
+    <code>http://127.0.0.1:&lt;port&gt;</code> (loopback only — it's never
+    reachable from the network). Use the built-in <strong>Test Chat</strong>
+    window to confirm it's working, or point any OpenAI-compatible client at
+    the URL shown in the popover.
+  </p>
+
+  <footer>
+    Petit Pomme is published by PathPilot LLC, provided as-is with no
+    warranty. See the project's README and LICENSE for full details.
+  </footer>
+
+</main>
+</body>
+</html>
