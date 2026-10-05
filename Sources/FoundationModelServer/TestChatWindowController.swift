@@ -3,8 +3,10 @@ import AppKit
 /// A tiny, self-contained chat window for exercising the server without
 /// needing an external client — talks to the server's own
 /// `/v1/chat/completions` endpoint over loopback, the exact same way any
-/// other client would, under a fixed session name so multi-turn context
-/// actually carries across messages.
+/// other client would, under the app's shared session name so multi-turn
+/// context actually carries across messages. Persona (the instruction
+/// prompt) and starting a new session both live in the main popover, not
+/// here — this window just inherits whatever's currently set there.
 @MainActor
 final class TestChatWindowController: NSWindowController {
     private let controller: ServerController
@@ -12,10 +14,16 @@ final class TestChatWindowController: NSWindowController {
     private let scrollView = NSScrollView()
     private let inputField = NSTextField()
     private let sendButton = NSButton(title: "Send", target: nil, action: nil)
-    private let sessionName = "test-console"
+
+    /// Tracks `controller.sessionGeneration` so that if "New Session" was
+    /// used in the popover while this window wasn't frontmost, the stale
+    /// transcript gets cleared the next time this window is actually shown,
+    /// rather than silently disagreeing with what the server now holds.
+    private var lastSeenGeneration: Int
 
     init(controller: ServerController) {
         self.controller = controller
+        self.lastSeenGeneration = controller.sessionGeneration
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 340, height: 420),
             styleMask: [.titled, .closable, .resizable, .miniaturizable],
@@ -36,6 +44,10 @@ final class TestChatWindowController: NSWindowController {
     }
 
     func show() {
+        if controller.sessionGeneration != lastSeenGeneration {
+            lastSeenGeneration = controller.sessionGeneration
+            textView.string = ""
+        }
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
         window?.makeFirstResponder(inputField)
@@ -107,9 +119,10 @@ final class TestChatWindowController: NSWindowController {
         }
 
         let port = controller.port
+        let instructions = controller.sessionInstructions
         Task {
             do {
-                let reply = try await Self.sendMessage(text, port: port, session: sessionName)
+                let reply = try await Self.sendMessage(text, port: port, session: ServerController.appSessionName, instructions: instructions)
                 appendMessage(name: "PePo", text: reply, isUser: false)
             } catch {
                 appendSystemNote("⚠️ \(error.localizedDescription)")
@@ -154,14 +167,25 @@ final class TestChatWindowController: NSWindowController {
         textView.scrollToEndOfDocument(nil)
     }
 
-    private static func sendMessage(_ text: String, port: UInt16, session: String) async throws -> String {
+    /// `instructions`, if non-empty, is sent as a `"system"` role message
+    /// alongside the user's own. The server only actually applies it the
+    /// moment a named session is first created — on every later turn it's
+    /// silently ignored — so it's safe (and simplest) to just always include
+    /// whatever the popover's instruction prompt currently holds with every
+    /// request, rather than tracking "is this the first message" here too.
+    private static func sendMessage(_ text: String, port: UInt16, session: String, instructions: String) async throws -> String {
         let url = URL(string: "http://127.0.0.1:\(port)/v1/chat/completions")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        var messages: [[String: String]] = []
+        if !instructions.isEmpty {
+            messages.append(["role": "system", "content": instructions])
+        }
+        messages.append(["role": "user", "content": text])
         let body: [String: Any] = [
             "session": session,
-            "messages": [["role": "user", "content": text]],
+            "messages": messages,
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 

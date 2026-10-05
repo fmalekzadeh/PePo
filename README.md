@@ -49,6 +49,8 @@ disclaimer in its standard legal form as well.
     `"stream": true` for Server-Sent-Events streaming
   - `GET /v1/sessions` — lists active named sessions (see below) and their
     current token usage
+  - `POST /v1/sessions/clear` — ends a named session (`{"session":"<name>"}`)
+    so its next message starts a brand new one
 - Multi-turn conversations are replayed through `FoundationModels`' own
   `Transcript` type, not flattened into hand-labeled text — this matters: a
   naive "User: ... / Assistant: ..." text flattening measurably degrades the
@@ -57,16 +59,26 @@ disclaimer in its standard legal form as well.
   request and the server keeps that conversation alive itself — persisted to
   disk, surviving even an app restart — so the client only needs to send its
   newest message instead of replaying full history every call. Near the
-  model's context window limit, the session is automatically summarized by
-  the model itself and reset to a much shorter transcript so the conversation
-  keeps going; the full pre-summary transcript is archived to disk first, so
-  nothing is ever lost.
+  model's context window limit, the session is automatically summarized —
+  by a separate, disposable model session fed the flattened transcript, not
+  the live (already nearly-full) one — and reset to a much shorter transcript
+  so the conversation keeps going; the full pre-summary transcript is
+  archived to disk first, so nothing is ever lost.
+- **Instructions/persona, set once**: an optional `"role": "system"` message
+  is applied only the moment a named session is first created, then ignored
+  on every later turn in that same session — matching how a "system prompt"
+  behaves elsewhere, without silently re-sending it (and spending tokens on
+  it) every turn. Changing persona means starting a new session.
 - A minimal, native-feeling menu bar UI: a Start/Stop switch, live status and
   Apple Intelligence availability, port (editable), request count, a
   token-usage gauge (colors the menu bar apple icon green/orange/red as the
-  most recent request approaches the 4096-token context window), a built-in
-  **Test Chat** window (⌘T) for trying the server without any external tool,
-  and an **About** panel (⌘A).
+  most recent request approaches the 4096-token context window), an
+  **Instruction prompt** box (edit/cancel/save — greyed out once the app's
+  session is actually live, since edits wouldn't apply until a new one
+  starts), a built-in **Test Chat** window (⌘T) for trying the server without
+  any external tool, **New Session** (⌘N) to end the current conversation and
+  reset the instruction prompt back to its default, and an **About** panel
+  (⌘A).
 
 ## Requirements
 
@@ -119,6 +131,24 @@ curl http://127.0.0.1:11535/v1/chat/completions \
 curl http://127.0.0.1:11535/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"session":"my-chat","messages":[{"role":"user","content":"What is my name?"}]}'
+```
+
+Setting a persona — only honored on the message that actually creates the
+session (the first one under a given `"session"` name); a system message on
+any later turn in that same session is silently ignored:
+
+```bash
+curl http://127.0.0.1:11535/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"session":"editor","messages":[{"role":"system","content":"You are an expert copy editor."},{"role":"user","content":"Fix this: Its a nice day outside"}]}'
+```
+
+Ending a session so its next message starts fresh (e.g. to change persona):
+
+```bash
+curl http://127.0.0.1:11535/v1/sessions/clear \
+  -H "Content-Type: application/json" \
+  -d '{"session":"editor"}'
 ```
 
 ## Known limitations

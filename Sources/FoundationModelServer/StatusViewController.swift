@@ -33,13 +33,27 @@ final class StatusViewController: NSViewController {
     private let autoSummaryNoteLabel = NSTextField(wrappingLabelWithString: "")
     private let requestCountLabel = NSTextField(labelWithString: "")
 
+    private let instructionsLabel = NSTextField(labelWithString: "Instruction prompt (Optional)")
+    private let instructionsEditButton = NSButton(image: NSImage(systemSymbolName: "pencil", accessibilityDescription: "Edit instruction prompt") ?? NSImage(), target: nil, action: nil)
+    private let instructionsCancelButton = NSButton(image: NSImage(systemSymbolName: "xmark", accessibilityDescription: "Cancel") ?? NSImage(), target: nil, action: nil)
+    private let instructionsSaveButton = NSButton(image: NSImage(systemSymbolName: "square.and.arrow.down", accessibilityDescription: "Save") ?? NSImage(), target: nil, action: nil)
+    private let instructionsTextView = NSTextView()
+    private let instructionsScrollView = NSScrollView()
+    private let instructionsNoteLabel = NSTextField(wrappingLabelWithString: "")
+    /// Whether the instruction box is currently in its editable state (entered
+    /// via the pencil button) — greyed out and read-only the rest of the time,
+    /// so there's never ambiguity about whether typing "did" anything.
+    private var isEditingInstructions = false
+
     private let testRow = MenuRowView(title: "Test Chat", shortcut: "⌘T")
+    private let newSessionRow = MenuRowView(title: "New Session", shortcut: "⌘N")
     private let aboutRow = MenuRowView(title: "About", shortcut: "⌘A")
     private let quitRow = MenuRowView(title: "Quit", shortcut: "⌘Q")
     /// Invisible — exist only so these have real keyboard shortcuts while the
     /// popover is key. `MenuRowView` is a plain view (not an `NSButton`), so
     /// it has no `keyEquivalent` of its own.
     private let testKeyEquivalentButton = NSButton(title: "", target: nil, action: nil)
+    private let newSessionKeyEquivalentButton = NSButton(title: "", target: nil, action: nil)
     private let aboutKeyEquivalentButton = NSButton(title: "", target: nil, action: nil)
     private let quitKeyEquivalentButton = NSButton(title: "", target: nil, action: nil)
     private let aboutWindowController = AboutWindowController()
@@ -86,7 +100,17 @@ final class StatusViewController: NSViewController {
         copyURLButton.target = self
         copyURLButton.action = #selector(copyURLTapped)
 
+        instructionsTextView.string = controller.sessionInstructions
+
+        instructionsEditButton.target = self
+        instructionsEditButton.action = #selector(instructionsEditTapped)
+        instructionsCancelButton.target = self
+        instructionsCancelButton.action = #selector(instructionsCancelTapped)
+        instructionsSaveButton.target = self
+        instructionsSaveButton.action = #selector(instructionsSaveTapped)
+
         testRow.action = { [weak self] in self?.testTapped() }
+        newSessionRow.action = { [weak self] in self?.newSessionTapped() }
         aboutRow.action = { [weak self] in self?.infoTapped() }
         quitRow.action = { [weak self] in self?.quitTapped() }
 
@@ -95,6 +119,12 @@ final class StatusViewController: NSViewController {
         testKeyEquivalentButton.keyEquivalent = "t"
         testKeyEquivalentButton.keyEquivalentModifierMask = .command
         testKeyEquivalentButton.isHidden = true
+
+        newSessionKeyEquivalentButton.target = self
+        newSessionKeyEquivalentButton.action = #selector(newSessionTapped)
+        newSessionKeyEquivalentButton.keyEquivalent = "n"
+        newSessionKeyEquivalentButton.keyEquivalentModifierMask = .command
+        newSessionKeyEquivalentButton.isHidden = true
 
         aboutKeyEquivalentButton.target = self
         aboutKeyEquivalentButton.action = #selector(infoTapped)
@@ -195,7 +225,63 @@ final class StatusViewController: NSViewController {
         serverBlock.alignment = .leading
         serverBlock.spacing = 7
 
-        let menuBlock = NSStackView(views: [testRow, aboutRow, quitRow])
+        // Instruction prompt — a persona/system prompt sent once, only when
+        // a session is first created (see `ServerController.sessionInstructions`).
+        // Lives here rather than in Test Chat itself, since it governs the
+        // one shared app session regardless of which window talks to it.
+        instructionsLabel.font = .systemFont(ofSize: 12)
+
+        for button in [instructionsEditButton, instructionsCancelButton, instructionsSaveButton] {
+            button.isBordered = false
+            button.bezelStyle = .regularSquare
+            button.imagePosition = .imageOnly
+            button.contentTintColor = .secondaryLabelColor
+            (button.cell as? NSButtonCell)?.imageScaling = .scaleProportionallyDown
+            button.translatesAutoresizingMaskIntoConstraints = false
+            button.widthAnchor.constraint(equalToConstant: 13).isActive = true
+            button.heightAnchor.constraint(equalToConstant: 13).isActive = true
+        }
+
+        let instructionsLabelSpacer = NSView()
+        instructionsLabelSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let instructionsLabelRow = NSStackView(views: [
+            instructionsLabel, instructionsLabelSpacer,
+            instructionsEditButton, instructionsCancelButton, instructionsSaveButton,
+        ])
+        instructionsLabelRow.orientation = .horizontal
+        instructionsLabelRow.alignment = .centerY
+        instructionsLabelRow.spacing = 6
+
+        instructionsScrollView.hasVerticalScroller = true
+        instructionsScrollView.borderType = .bezelBorder
+        instructionsScrollView.translatesAutoresizingMaskIntoConstraints = false
+        instructionsScrollView.widthAnchor.constraint(equalToConstant: 264).isActive = true
+        instructionsScrollView.heightAnchor.constraint(equalToConstant: 56).isActive = true
+
+        instructionsTextView.font = .systemFont(ofSize: 11.5)
+        instructionsTextView.isRichText = false
+        instructionsTextView.isEditable = false
+        instructionsTextView.textColor = .tertiaryLabelColor
+        instructionsTextView.isSelectable = true
+        instructionsTextView.drawsBackground = true
+        instructionsTextView.textContainerInset = NSSize(width: 4, height: 4)
+        instructionsTextView.isVerticallyResizable = true
+        instructionsTextView.isHorizontallyResizable = false
+        instructionsTextView.autoresizingMask = [.width]
+        instructionsTextView.textContainer?.widthTracksTextView = true
+        instructionsScrollView.documentView = instructionsTextView
+
+        instructionsNoteLabel.stringValue = "Sent once, when a new session starts. Counts toward the context window."
+        instructionsNoteLabel.font = .systemFont(ofSize: 10)
+        instructionsNoteLabel.textColor = .tertiaryLabelColor
+        instructionsNoteLabel.preferredMaxLayoutWidth = 264
+
+        let instructionsBlock = NSStackView(views: [instructionsLabelRow, instructionsScrollView, instructionsNoteLabel])
+        instructionsBlock.orientation = .vertical
+        instructionsBlock.alignment = .leading
+        instructionsBlock.spacing = 5
+
+        let menuBlock = NSStackView(views: [testRow, newSessionRow, aboutRow, quitRow])
         menuBlock.orientation = .vertical
         menuBlock.alignment = .leading
         menuBlock.spacing = 2
@@ -204,6 +290,8 @@ final class StatusViewController: NSViewController {
             headerBlock,
             NSBox.separatorLine(),
             serverBlock,
+            NSBox.separatorLine(),
+            instructionsBlock,
             NSBox.separatorLine(),
             menuBlock,
         ])
@@ -220,6 +308,7 @@ final class StatusViewController: NSViewController {
         let padding = popoverPadding
         view.addSubview(stack)
         view.addSubview(testKeyEquivalentButton)
+        view.addSubview(newSessionKeyEquivalentButton)
         view.addSubview(aboutKeyEquivalentButton)
         view.addSubview(quitKeyEquivalentButton)
         NSLayoutConstraint.activate([
@@ -228,7 +317,7 @@ final class StatusViewController: NSViewController {
             stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -padding),
             stack.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -padding),
         ])
-        for row in [headerBlock, headerRow, serverBlock, portRow, urlRow, autoSummaryRow, menuBlock, testRow, aboutRow, quitRow] {
+        for row in [headerBlock, headerRow, serverBlock, portRow, urlRow, autoSummaryRow, instructionsBlock, instructionsLabelRow, menuBlock, testRow, newSessionRow, aboutRow, quitRow] {
             row.translatesAutoresizingMaskIntoConstraints = false
             row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
@@ -265,6 +354,17 @@ final class StatusViewController: NSViewController {
 
         requestCountLabel.isHidden = !controller.isRunning
         requestCountLabel.stringValue = "\(controller.requestCount) request\(controller.requestCount == 1 ? "" : "s") served"
+
+        // Re-check against the actual session state (not assumed) — an
+        // external client can start/use this same session just as validly
+        // as Test Chat can, so this is the only way to know for sure.
+        controller.refreshAppSessionActiveState()
+        // Never fight with an edit actually in progress — only resync the
+        // read-only display from the model when the user isn't mid-edit.
+        if !isEditingInstructions {
+            instructionsTextView.string = controller.sessionInstructions
+        }
+        applyInstructionsButtonState()
 
         // Let the popover grow/shrink to fit — e.g. the URL/endpoints block
         // only exists while running, so there's no reason to reserve that
@@ -304,6 +404,64 @@ final class StatusViewController: NSViewController {
         let windowController = testChatWindowController ?? TestChatWindowController(controller: controller)
         testChatWindowController = windowController
         windowController.show()
+    }
+
+    /// Ends the shared app session and resets the instruction prompt back to
+    /// its default — a full clean slate for the next persona you try, rather
+    /// than silently carrying over whatever was last typed. Briefly confirms
+    /// in the status line, matching the copy-URL button's checkmark pattern.
+    @objc private func newSessionTapped() {
+        controller.startNewSession()
+        isEditingInstructions = false
+        refresh()
+        statusMessageLabel.stringValue = "New session started."
+        statusMessageLabel.textColor = .secondaryLabelColor
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+            self?.refresh()
+        }
+    }
+
+    /// Enters edit mode: the box becomes editable, and the single pencil
+    /// button is replaced by explicit cancel/save buttons — there's no
+    /// implicit "typing already saved it" state in between.
+    @objc private func instructionsEditTapped() {
+        isEditingInstructions = true
+        instructionsTextView.isEditable = true
+        instructionsTextView.textColor = .labelColor
+        applyInstructionsButtonState()
+        view.window?.makeFirstResponder(instructionsTextView)
+    }
+
+    /// Discards whatever's currently typed and reverts the box to the last
+    /// actually-saved instructions.
+    @objc private func instructionsCancelTapped() {
+        instructionsTextView.string = controller.sessionInstructions
+        exitInstructionsEditMode()
+    }
+
+    /// The only way `sessionInstructions` actually gets committed — typing
+    /// alone never saves, so there's no ambiguity about whether an edit
+    /// "took."
+    @objc private func instructionsSaveTapped() {
+        controller.sessionInstructions = instructionsTextView.string
+        exitInstructionsEditMode()
+    }
+
+    private func exitInstructionsEditMode() {
+        isEditingInstructions = false
+        instructionsTextView.isEditable = false
+        instructionsTextView.textColor = .tertiaryLabelColor
+        applyInstructionsButtonState()
+    }
+
+    /// Which of the three buttons show, and whether the pencil itself is
+    /// usable — edits are pointless (and disabled) once the shared session
+    /// actually exists, since instructions only apply at session creation.
+    private func applyInstructionsButtonState() {
+        instructionsEditButton.isHidden = isEditingInstructions
+        instructionsCancelButton.isHidden = !isEditingInstructions
+        instructionsSaveButton.isHidden = !isEditingInstructions
+        instructionsEditButton.isEnabled = !controller.isAppSessionActive
     }
 
     @objc private func copyURLTapped() {

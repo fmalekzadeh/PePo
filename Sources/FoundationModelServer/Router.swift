@@ -46,6 +46,9 @@ final class Router: Sendable {
         case ("POST", "/v1/chat/completions"):
             await handleChatCompletions(request, writer: writer)
 
+        case ("POST", "/v1/sessions/clear"):
+            await handleClearSession(request, writer: writer)
+
         default:
             let error = OpenAIErrorResponse(error: .init(message: "No route for \(request.method) \(request.path)", type: "invalid_request_error"))
             await writer.respond(.json(error, status: 404))
@@ -86,6 +89,21 @@ final class Router: Sendable {
                 await writer.respond(errorResponse(for: error))
             }
         }
+    }
+
+    /// Non-standard, additive endpoint (like `/v1/sessions`): ends a named
+    /// session so its next message starts a brand new one — e.g. to switch
+    /// `instructions`/persona mid-prototyping, which otherwise only ever
+    /// takes effect the moment a session is first created.
+    private func handleClearSession(_ request: HTTPRequest, writer: HTTPResponseWriter) async {
+        guard let body = try? JSONDecoder().decode(ClearSessionRequest.self, from: request.body),
+              !body.session.isEmpty else {
+            let error = OpenAIErrorResponse(error: .init(message: "'session' is required", type: "invalid_request_error"))
+            await writer.respond(.json(error, status: 400))
+            return
+        }
+        await modelService.clearSession(body.session)
+        await writer.respond(.json(ClearSessionResponse(cleared: true, session: body.session)))
     }
 
     private func errorResponse(for error: Error) -> HTTPResponse {

@@ -156,3 +156,12 @@ struct SessionsListResponse: Codable {
 
     let sessions: [Session]
 }
+
+struct ClearSessionRequest: Codable {
+    let session: String
+}
+
+struct ClearSessionResponse: Codable {
+    let cleared: Bool
+    let session: String
+}

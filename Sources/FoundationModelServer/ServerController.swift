@@ -81,6 +81,61 @@ final class ServerController {
 
     var isBusy: Bool { activeRequestCount > 0 }
 
+    /// System instructions sent once, when a session is first created — set
+    /// from the main popover, inherited by Test Chat (and any other client
+    /// that uses the shared `appSessionName` session). Persisted so it
+    /// survives a popover close/reopen and an app restart.
+    var sessionInstructions: String {
+        didSet {
+            guard sessionInstructions != oldValue else { return }
+            Self.defaults.set(sessionInstructions, forKey: Self.instructionsDefaultsKey)
+        }
+    }
+
+    /// Bumped every time `startNewSession()` runs, so any other UI showing
+    /// this session's transcript (Test Chat) can tell its displayed history
+    /// just went stale without needing a full observer/notification system.
+    private(set) var sessionGeneration = 0
+
+    /// Whether the app's shared session actually exists yet — checked
+    /// against `SessionManager` itself (not inferred/assumed here), since an
+    /// external client can create or use it just as validly as Test Chat
+    /// can. Drives graying out the instruction prompt once editing it would
+    /// silently have no effect. Call `refreshAppSessionActiveState()` to
+    /// requery; this just reflects the last known answer.
+    private(set) var isAppSessionActive = false {
+        didSet { if isAppSessionActive != oldValue { onChange?() } }
+    }
+
+    /// The single named, server-held session the app's own UI (Test Chat)
+    /// talks to — distinct from arbitrary session names an external client
+    /// might use. A shared constant so the popover's "New Session" action and
+    /// Test Chat's requests can never drift onto different session names.
+    static let appSessionName = "default"
+
+    static let defaultInstructions = "You are a friendly, helpful assistant. Keep your answers clear and concise."
+
+    /// Ends the app's own session so its next message starts fresh under
+    /// whatever's currently in `sessionInstructions` — the only way to change
+    /// persona mid-conversation, since instructions only take effect when a
+    /// session is first created.
+    func startNewSession() {
+        sessionGeneration += 1
+        isAppSessionActive = false
+        sessionInstructions = Self.defaultInstructions
+        Task { await modelService.clearSession(Self.appSessionName) }
+    }
+
+    /// Re-checks whether the app's shared session actually exists right now.
+    /// Cheap (an in-process actor call) — safe to call on every popover
+    /// refresh so a change made elsewhere (Test Chat, or any external
+    /// client) is reflected the next time the popover is opened.
+    func refreshAppSessionActiveState() {
+        Task {
+            isAppSessionActive = await modelService.isSessionActive(Self.appSessionName)
+        }
+    }
+
     /// Called (on the main thread) whenever any of the above changes.
     var onChange: (() -> Void)?
 
@@ -96,6 +151,7 @@ final class ServerController {
     private static let defaults = UserDefaults(suiteName: "com.local.FoundationModelServer.prefs")!
     private static let portDefaultsKey = "port"
     private static let autoSummaryDefaultsKey = "autoSummaryEnabled"
+    private static let instructionsDefaultsKey = "sessionInstructions"
     static let defaultPort: UInt16 = 11535
 
     var isRunning: Bool {
@@ -107,6 +163,7 @@ final class ServerController {
         let saved = Self.defaults.integer(forKey: Self.portDefaultsKey)
         port = (saved > 0 && saved <= Int(UInt16.max)) ? UInt16(saved) : Self.defaultPort
         autoSummaryEnabled = Self.defaults.object(forKey: Self.autoSummaryDefaultsKey) as? Bool ?? true
+        sessionInstructions = Self.defaults.string(forKey: Self.instructionsDefaultsKey) ?? Self.defaultInstructions
         refreshAvailability()
         // The didSet above doesn't fire for this first assignment, so push
         // the loaded value through explicitly.

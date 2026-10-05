@@ -83,6 +83,17 @@ struct ModelService {
         await sessionManager.setAutoSummaryEnabled(enabled)
     }
 
+    /// Ends a named session so the next message under that name starts fresh
+    /// — the only way to change a session's `instructions` persona, since
+    /// those only take effect when a session is first created.
+    func clearSession(_ name: String) async {
+        await sessionManager.clearSession(name: name)
+    }
+
+    func isSessionActive(_ name: String) async -> Bool {
+        await sessionManager.isActive(name: name)
+    }
+
     func chatCompletion(_ request: ChatCompletionRequest) async throws -> ChatResult {
         try requireAvailable()
         if let sessionName = request.session {
