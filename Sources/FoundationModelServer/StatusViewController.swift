@@ -25,6 +25,12 @@ final class StatusViewController: NSViewController {
     private let statusMessageLabel = NSTextField(wrappingLabelWithString: "")
 
     private let portField = NSTextField()
+    private let httpRadio = NSButton(radioButtonWithTitle: "HTTP", target: nil, action: nil)
+    private let httpsRadio = NSButton(radioButtonWithTitle: "HTTPS", target: nil, action: nil)
+    private let schemeRow = NSStackView()
+    private let trustCertificateButton = NSButton(title: "Trust Certificate…", target: nil, action: nil)
+    /// Last failure from the trust prompt, shown until the next attempt.
+    private var trustErrorMessage: String?
     private let urlLabel = NSTextField(labelWithString: "")
     private let copyURLButton = NSButton(image: NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: "Copy URL") ?? NSImage(), target: nil, action: nil)
     private let httpsNoteLabel = NSTextField(wrappingLabelWithString: "")
@@ -86,7 +92,7 @@ final class StatusViewController: NSViewController {
         super.viewDidLoad()
         buildLayout()
 
-        portField.stringValue = String(controller.port)
+        portField.stringValue = String(controller.displayedPort)
         portField.target = self
         portField.action = #selector(portFieldChanged)
 
@@ -100,6 +106,15 @@ final class StatusViewController: NSViewController {
 
         copyURLButton.target = self
         copyURLButton.action = #selector(copyURLTapped)
+
+        trustCertificateButton.target = self
+        trustCertificateButton.action = #selector(trustCertificateTapped)
+
+        // Sharing an action is what groups the two as one radio set.
+        for radio in [httpRadio, httpsRadio] {
+            radio.target = self
+            radio.action = #selector(schemeRadioChanged(_:))
+        }
 
         instructionsTextView.string = controller.sessionInstructions
 
@@ -174,6 +189,22 @@ final class StatusViewController: NSViewController {
         portRow.orientation = .horizontal
         portRow.alignment = .centerY
 
+        // Both listeners always run; this only picks which one's port the
+        // field above edits and whose URL is shown and copied — whichever the
+        // client being set up will actually use. Visible while stopped too,
+        // since that's the only time the port can be edited.
+        let schemeLabel = NSTextField(labelWithString: "Protocol")
+        schemeLabel.font = .systemFont(ofSize: 12)
+        for radio in [httpRadio, httpsRadio] {
+            radio.font = .systemFont(ofSize: 12)
+        }
+        let schemeSpacer = NSView()
+        schemeSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        schemeRow.setViews([schemeLabel, schemeSpacer, httpRadio, httpsRadio], in: .leading)
+        schemeRow.orientation = .horizontal
+        schemeRow.alignment = .centerY
+        schemeRow.spacing = 10
+
         urlLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
         urlLabel.textColor = .secondaryLabelColor
         urlLabel.isSelectable = true
@@ -194,17 +225,20 @@ final class StatusViewController: NSViewController {
         urlRow.alignment = .centerY
         urlRow.spacing = 5
 
-        // Shown only once the HTTPS listener actually comes up (best-effort —
-        // see `ServerController.isHTTPSActive`). Needed for a hosted
+        // Explains whichever scheme is picked. HTTPS matters for a hosted
         // prototype's Safari testers specifically: unlike Chrome, Safari has
         // no response header that can let an https:// page fetch() a plain
         // http:// loopback endpoint, so the page's own fetch target has to
-        // be https:// too, and each person visits this URL once to accept
-        // the self-signed certificate before that fetch will succeed.
+        // be https:// too, and each person visits the health URL once to
+        // accept the self-signed certificate before that fetch will succeed.
         httpsNoteLabel.font = .systemFont(ofSize: 10)
         httpsNoteLabel.textColor = .tertiaryLabelColor
         httpsNoteLabel.preferredMaxLayoutWidth = 264
         httpsNoteLabel.isSelectable = true
+
+        trustCertificateButton.controlSize = .small
+        trustCertificateButton.font = .systemFont(ofSize: 11)
+        trustCertificateButton.bezelStyle = .rounded
 
         endpointsLabel.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
         endpointsLabel.textColor = .secondaryLabelColor
@@ -228,8 +262,10 @@ final class StatusViewController: NSViewController {
 
         let serverBlock = NSStackView(views: [
             portRow,
+            schemeRow,
             urlRow,
             httpsNoteLabel,
+            trustCertificateButton,
             endpointsLabel,
             autoSummaryRow,
             autoSummaryNoteLabel,
@@ -331,7 +367,7 @@ final class StatusViewController: NSViewController {
             stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -padding),
             stack.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -padding),
         ])
-        for row in [headerBlock, headerRow, serverBlock, portRow, urlRow, httpsNoteLabel, autoSummaryRow, instructionsBlock, instructionsLabelRow, menuBlock, testRow, newSessionRow, aboutRow, quitRow] {
+        for row in [headerBlock, headerRow, serverBlock, portRow, schemeRow, urlRow, httpsNoteLabel, autoSummaryRow, instructionsBlock, instructionsLabelRow, menuBlock, testRow, newSessionRow, aboutRow, quitRow] {
             row.translatesAutoresizingMaskIntoConstraints = false
             row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
@@ -358,20 +394,46 @@ final class StatusViewController: NSViewController {
         portField.isEnabled = !controller.isRunning
         // Don't clobber text the user is actively typing into the field.
         if portField.currentEditor() == nil {
-            portField.stringValue = String(controller.port)
+            portField.stringValue = String(controller.displayedPort)
         }
 
-        urlLabel.isHidden = !controller.isRunning
-        urlLabel.stringValue = "http://127.0.0.1:\(controller.port)/v1"
-        copyURLButton.isHidden = !controller.isRunning
-        endpointsLabel.isHidden = !controller.isRunning
+        let running = controller.isRunning
+        let scheme = controller.displayedScheme
+        httpRadio.state = scheme == .http ? .on : .off
+        httpsRadio.state = scheme == .https ? .on : .off
+        urlLabel.isHidden = !running
+        httpsNoteLabel.isHidden = !running
+        endpointsLabel.isHidden = !running
 
-        if let httpsHealthURL = controller.httpsHealthURL {
-            httpsNoteLabel.isHidden = false
-            httpsNoteLabel.stringValue = "For Safari/hosted prototypes, visit \(httpsHealthURL) once to approve the local certificate."
+        let baseURL = controller.displayedBaseURL
+        copyURLButton.isHidden = !running || baseURL == nil
+        if let baseURL {
+            urlLabel.stringValue = baseURL
         } else {
-            httpsNoteLabel.isHidden = true
+            urlLabel.stringValue = controller.didHTTPSFail ? "HTTPS unavailable" : "Starting HTTPS…"
         }
+
+        var showTrustButton = false
+        switch scheme {
+        case .http:
+            httpsNoteLabel.stringValue = "For scripts, local tools, and Chrome. Hosted pages opened in Safari need HTTPS."
+        case .https:
+            if controller.isHTTPSActive {
+                if controller.isCertificateTrusted {
+                    httpsNoteLabel.stringValue = "For hosted pages in Safari or Chrome. This Mac trusts PePo's local certificate."
+                } else {
+                    showTrustButton = true
+                    httpsNoteLabel.stringValue = trustErrorMessage
+                        ?? "Browsers block HTTPS until this Mac trusts PePo's local certificate. macOS will ask for your password."
+                }
+            } else if controller.didHTTPSFail {
+                httpsNoteLabel.stringValue = "The local certificate couldn't be set up. HTTP still works."
+            } else {
+                httpsNoteLabel.stringValue = "Setting up the local certificate…"
+            }
+        }
+        trustCertificateButton.isHidden = !running || !showTrustButton
+        trustCertificateButton.isEnabled = !controller.isTrustingCertificate
 
         requestCountLabel.isHidden = !controller.isRunning
         requestCountLabel.stringValue = "\(controller.requestCount) request\(controller.requestCount == 1 ? "" : "s") served"
@@ -404,6 +466,26 @@ final class StatusViewController: NSViewController {
             controller.start()
         } else {
             controller.stop()
+        }
+        refresh()
+    }
+
+    @objc private func schemeRadioChanged(_ sender: NSButton) {
+        controller.displayedScheme = sender === httpsRadio ? .https : .http
+        // Show the newly selected scheme's port, discarding any half-typed
+        // value that belonged to the other one.
+        if portField.currentEditor() != nil {
+            portField.abortEditing()
+        }
+        refresh()
+    }
+
+    @objc private func trustCertificateTapped() {
+        trustErrorMessage = nil
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.trustErrorMessage = await self.controller.trustCertificate()
+            self.refresh()
         }
         refresh()
     }
@@ -502,10 +584,13 @@ final class StatusViewController: NSViewController {
 
     private func applyPortFromField() {
         guard let value = UInt16(portField.stringValue.trimmingCharacters(in: .whitespaces)), value > 0 else {
-            portField.stringValue = String(controller.port)
+            portField.stringValue = String(controller.displayedPort)
             return
         }
-        controller.applyPort(value)
+        if !controller.applyDisplayedPort(value) {
+            NSSound.beep()
+            portField.stringValue = String(controller.displayedPort)
+        }
         refresh()
     }
 }

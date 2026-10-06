@@ -221,15 +221,16 @@
       extra steps.</li>
     <li><strong>Safari</strong> — refuses to call a plain <code>http://</code>
       endpoint from a page served over <code>https://</code>, with no
-      workaround on the server's side. PePo also serves HTTPS on
-      <code>port + 1</code> for exactly this reason, using a self-signed
-      certificate generated on first launch. The popover shows a URL like
-      <code>https://127.0.0.1:&lt;port+1&gt;/health</code> while the server is
-      running — visit it once in Safari and click through the "this
-      connection is not private" warning (it's your own Mac, talking to
-      itself) to accept the certificate. After that, point your hosted
-      page's requests at that same <code>https://</code> URL instead of
-      <code>http://</code>.</li>
+      workaround on the server's side. PePo also serves HTTPS for exactly
+      this reason (on <code>port + 1</code> by default), using a local
+      certificate generated on first launch. In the popover, set
+      <strong>Protocol</strong> to <strong>HTTPS</strong> and click
+      <strong>Trust Certificate…</strong> once — macOS asks for your
+      password, then adds the certificate to your login keychain. (It's your
+      own Mac, talking to itself; the certificate only covers
+      <code>127.0.0.1</code> and <code>localhost</code>.) After that, point
+      your hosted page's requests at the <code>https://</code> URL the
+      popover shows. This works in Chrome/Edge too.</li>
   </ul>
 
   <footer>

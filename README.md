@@ -41,17 +41,22 @@ disclaimer in its standard legal form as well.
 
 - Runs a minimal HTTP/1.1 server (built directly on `Network.framework`, no
   dependencies) bound to `127.0.0.1` only — it never listens on your network.
-- Also serves HTTPS on `port + 1`, using a self-signed certificate generated
-  once (via the system's own `/usr/bin/openssl`, not a bundled dependency)
-  and cached in Application Support. This exists for browser-hosted clients:
-  a page published on a public HTTPS origin (e.g. a Figma Make prototype)
-  that talks to a local PePo instance hits two different browser
-  restrictions calling `http://127.0.0.1` from an `https://` page — Chrome's
-  (Private Network Access) is satisfied by a response header this server
-  already sends; Safari's (plain mixed-content blocking) has no such header
-  and can only be satisfied by the target also being `https://`. Each person
-  testing such a prototype in Safari needs to visit the HTTPS health URL
-  once (shown in the popover while running) to accept the certificate.
+- Also serves HTTPS (on `port + 1` by default, separately configurable),
+  using a local certificate generated once (via the system's own
+  `/usr/bin/openssl`, not a bundled dependency) and cached in Application
+  Support. This exists for browser-hosted clients: a page published on a
+  public HTTPS origin (e.g. a Figma Make prototype) that talks to a local
+  PePo instance hits two different browser restrictions calling
+  `http://127.0.0.1` from an `https://` page — Chrome's (Private Network
+  Access) is satisfied by a response header this server already sends;
+  Safari's (plain mixed-content blocking) has no such header and can only
+  be satisfied by the target also being `https://`. Browsers silently fail
+  background requests to an untrusted certificate, so set **Protocol** to
+  HTTPS in the popover and click **Trust Certificate…** once: macOS asks for
+  your password and adds the certificate (covering only `127.0.0.1` and
+  `localhost`) to your login keychain. Both listeners always run; the
+  popover's HTTP/HTTPS picker chooses which port the Port field edits and
+  which URL it shows and copies.
 - Exposes an OpenAI-compatible API:
   - `GET /health` — status check
   - `GET /v1/models` — lists the one available model (`apple-on-device`)

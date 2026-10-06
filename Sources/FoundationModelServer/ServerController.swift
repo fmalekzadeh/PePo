@@ -1,10 +1,16 @@
 import Foundation
+import Security
 
 enum ServerStatus: Equatable {
     case stopped
     case starting
     case running
     case error(String)
+}
+
+enum URLScheme: String {
+    case http
+    case https
 }
 
 /// Owns the HTTP server's lifecycle and the small bits of state the menu bar UI
@@ -81,12 +87,20 @@ final class ServerController {
 
     var isBusy: Bool { activeRequestCount > 0 }
 
-    /// The HTTP port's TLS-serving twin — always `port + 1`, not separately
-    /// configurable, to keep this simple. `nil` only in the practically
-    /// impossible case of `port` already being `UInt16.max`.
-    var httpsPort: UInt16? {
-        let next = Int(port) + 1
-        return next <= Int(UInt16.max) ? UInt16(next) : nil
+    /// The HTTPS listener's own port — separately configurable and persisted,
+    /// defaulting to `port + 1` the first time.
+    var httpsPort: UInt16 {
+        didSet {
+            guard httpsPort != oldValue else { return }
+            Self.defaults.set(Int(httpsPort), forKey: Self.httpsPortDefaultsKey)
+            onChange?()
+        }
+    }
+
+    /// The port belonging to whichever scheme the popover is showing — what
+    /// its Port field displays and edits.
+    var displayedPort: UInt16 {
+        displayedScheme == .https ? httpsPort : port
     }
 
     /// Whether the HTTPS listener actually started. Best-effort and
@@ -97,12 +111,75 @@ final class ServerController {
         didSet { if isHTTPSActive != oldValue { onChange?() } }
     }
 
-    /// Shown in the popover once HTTPS actually came up — e.g. for a hosted
-    /// prototype's Safari testers, who need to visit this once to accept the
-    /// self-signed certificate before `fetch()` calls to it will work.
-    var httpsHealthURL: String? {
-        guard isHTTPSActive, let httpsPort else { return nil }
-        return "https://127.0.0.1:\(httpsPort)/health"
+    /// Set when the HTTPS listener tried to start and couldn't — lets the
+    /// popover tell "still loading the certificate" apart from "won't come up".
+    private(set) var didHTTPSFail = false {
+        didSet { if didHTTPSFail != oldValue { onChange?() } }
+    }
+
+    /// The certificate the HTTPS listener is serving, once it's loaded.
+    private var tlsCertificate: SecCertificate?
+
+    /// Whether this Mac's trust settings accept `tlsCertificate` for TLS.
+    /// Browsers silently fail every `fetch()` to an untrusted certificate (a
+    /// background request has no click-through warning page), so HTTPS is
+    /// useless to a hosted page until this is true.
+    private(set) var isCertificateTrusted = false {
+        didSet { if isCertificateTrusted != oldValue { onChange?() } }
+    }
+
+    /// Set while the system password prompt for trusting the certificate is up.
+    private(set) var isTrustingCertificate = false {
+        didSet { if isTrustingCertificate != oldValue { onChange?() } }
+    }
+
+    /// Asks macOS (password prompt) to trust the HTTPS certificate in the
+    /// user's login keychain — Safari and Chrome both read trust from there.
+    /// Returns an error message to show, or `nil` on success/cancel.
+    func trustCertificate() async -> String? {
+        guard let tlsCertificate, !isTrustingCertificate else { return nil }
+        isTrustingCertificate = true
+        defer { isTrustingCertificate = false }
+        do {
+            try await TLSIdentityManager.trust(tlsCertificate)
+        } catch {
+            refreshCertificateTrust()
+            return error.localizedDescription
+        }
+        refreshCertificateTrust()
+        return nil
+    }
+
+    func refreshCertificateTrust() {
+        guard let tlsCertificate else {
+            isCertificateTrusted = false
+            return
+        }
+        isCertificateTrusted = TLSIdentityManager.isTrusted(tlsCertificate)
+    }
+
+    /// Which of the two (always both running) listeners the popover shows and
+    /// copies the URL for. Purely a display choice — the server can't know
+    /// which scheme a client will use, so the user picks the one they're
+    /// about to paste somewhere. Persisted across launches.
+    var displayedScheme: URLScheme {
+        didSet {
+            guard displayedScheme != oldValue else { return }
+            Self.defaults.set(displayedScheme.rawValue, forKey: Self.schemeDefaultsKey)
+            onChange?()
+        }
+    }
+
+    /// The API base URL for `displayedScheme`, or `nil` when HTTPS is picked
+    /// but its listener didn't come up.
+    var displayedBaseURL: String? {
+        switch displayedScheme {
+        case .http:
+            return "http://127.0.0.1:\(port)/v1"
+        case .https:
+            guard isHTTPSActive else { return nil }
+            return "https://127.0.0.1:\(httpsPort)/v1"
+        }
     }
 
     /// System instructions sent once, when a session is first created — set
@@ -177,6 +254,8 @@ final class ServerController {
     private static let portDefaultsKey = "port"
     private static let autoSummaryDefaultsKey = "autoSummaryEnabled"
     private static let instructionsDefaultsKey = "sessionInstructions"
+    private static let schemeDefaultsKey = "displayedScheme"
+    private static let httpsPortDefaultsKey = "httpsPort"
     static let defaultPort: UInt16 = 11535
 
     var isRunning: Bool {
@@ -187,8 +266,15 @@ final class ServerController {
     init() {
         let saved = Self.defaults.integer(forKey: Self.portDefaultsKey)
         port = (saved > 0 && saved <= Int(UInt16.max)) ? UInt16(saved) : Self.defaultPort
+        let savedHTTPS = Self.defaults.integer(forKey: Self.httpsPortDefaultsKey)
+        if savedHTTPS > 0 && savedHTTPS <= Int(UInt16.max) {
+            httpsPort = UInt16(savedHTTPS)
+        } else {
+            httpsPort = port == UInt16.max ? port - 1 : port + 1
+        }
         autoSummaryEnabled = Self.defaults.object(forKey: Self.autoSummaryDefaultsKey) as? Bool ?? true
         sessionInstructions = Self.defaults.string(forKey: Self.instructionsDefaultsKey) ?? Self.defaultInstructions
+        displayedScheme = Self.defaults.string(forKey: Self.schemeDefaultsKey).flatMap(URLScheme.init(rawValue:)) ?? .http
         refreshAvailability()
         // The didSet above doesn't fire for this first assignment, so push
         // the loaded value through explicitly.
@@ -203,12 +289,35 @@ final class ServerController {
     func start() {
         guard !isRunning else { return }
         status = .starting
+        didHTTPSFail = false
         refreshAvailability()
 
         let currentPort = port
-        let router = Router(
+        let router = makeRouter(port: currentPort)
+        let newServer = HTTPServer(port: currentPort, handler: router.handle)
+        do {
+            try newServer.start()
+            server = newServer
+            status = .running
+        } catch {
+            server = nil
+            status = .error(error.localizedDescription)
+            return
+        }
+
+        // Additive and best-effort: runs after the primary HTTP listener is
+        // already confirmed up, and never affects `status` either way.
+        let httpsRouter = makeRouter(port: httpsPort)
+        let currentHTTPSPort = httpsPort
+        Task { [weak self] in
+            await self?.startHTTPSServer(router: httpsRouter, port: currentHTTPSPort)
+        }
+    }
+
+    private func makeRouter(port: UInt16) -> Router {
+        Router(
             modelService: modelService,
-            port: currentPort,
+            port: port,
             onRequestHandled: { [weak self] in
                 Task { @MainActor in
                     self?.requestCount += 1
@@ -231,36 +340,21 @@ final class ServerController {
                 }
             }
         )
-        let newServer = HTTPServer(port: currentPort, handler: router.handle)
-        do {
-            try newServer.start()
-            server = newServer
-            status = .running
-        } catch {
-            server = nil
-            status = .error(error.localizedDescription)
-            return
-        }
-
-        // Additive and best-effort: runs after the primary HTTP listener is
-        // already confirmed up, and never affects `status` either way.
-        if let httpsPort {
-            Task { [weak self] in
-                await self?.startHTTPSServer(router: router, port: httpsPort)
-            }
-        }
     }
 
     private func startHTTPSServer(router: Router, port: UInt16) async {
         do {
-            let identity = try await TLSIdentityManager.loadOrCreateIdentity()
+            let (identity, certificate) = try await TLSIdentityManager.loadOrCreateIdentity()
             guard isRunning else { return } // stopped while the cert was loading
+            tlsCertificate = certificate
+            refreshCertificateTrust()
             let newHTTPSServer = HTTPServer(port: port, tlsIdentity: identity, handler: router.handle)
             try newHTTPSServer.start()
             httpsServer = newHTTPSServer
             isHTTPSActive = true
         } catch {
             isHTTPSActive = false
+            didHTTPSFail = true
         }
     }
 
@@ -274,11 +368,21 @@ final class ServerController {
         activeRequestCount = 0
     }
 
-    /// Applies a new port, restarting the server if it was running.
-    func applyPort(_ newPort: UInt16) {
+    /// Applies a new port to the scheme the popover is showing, restarting
+    /// the server if it was running. Returns false (nothing changed) if it
+    /// would collide with the other scheme's port.
+    @discardableResult
+    func applyDisplayedPort(_ newPort: UInt16) -> Bool {
+        let otherPort = displayedScheme == .https ? port : httpsPort
+        guard newPort != otherPort else { return false }
+        guard newPort != displayedPort else { return true }
         let wasRunning = isRunning
         if wasRunning { stop() }
-        port = newPort
+        switch displayedScheme {
+        case .http: port = newPort
+        case .https: httpsPort = newPort
+        }
         if wasRunning { start() }
+        return true
     }
 }
