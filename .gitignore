@@ -1,5 +1,4 @@
 .build/
-Petit Pomme.app/
 .DS_Store
 # Raw source design files — not needed to rebuild the app; the derived
 # AppIcon.icns and MenuBarIcons/*.png in Resources/ are what build-app.sh
